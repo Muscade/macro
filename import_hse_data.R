@@ -6,3 +6,4 @@ library("stringr")
 library("purrr")
 library("magrittr")
 
+# Gather data from Sophist HSE database
