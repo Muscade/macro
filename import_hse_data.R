@@ -23,25 +23,59 @@ import_tables <- function(){
   t <- as_tibble(tbls)
   names(t) <- "table_name"
   export_to_db(db_path = fin_db_path, data = t, 
-               target_table = "hse_tables", 
+               target_table = "dic_hse_tables", 
                delete_previous = TRUE)
 }
 
-# Import single serie
-import_serie <- function(tsname){
-  s_z <- sophisthse(tsname, output = "zoo")
-  s <- as_tibble(t_z)
-  s_info <- attr(t_z, "metadata")
-  
-  time_str <- time(s_z)
-  
-  if(str_detect(time_str[1], "^\\d{4}\\s+Q\\d{1}$")){
-    y <- str_match(time_str, "\\d{4}")
-    q <- str_match(time_str, "\\d{1}$")
-    dd <- str_c(str_replace_all(q, c("^1$" = "31.03", "^2$" = "30.06", "^3$" = "30.09", "^4$" = "31.12")), y, sep = ".")
-    time_date <- dmy(dd)
+# Import series
+import_series <- function(){
+  # tbls <- as_tibble(sophisthse_tables())
+  tbls <- get_db_table(fin_db_path, "dic_hse_tables")
+
+  r <- 1
+  r_step <- 1
+  n <- nrow(tbls)
+  while(r <= n){
+    sz <- sophisthse(tbls$table_name[r : min(r + r_step - 1, n)], output = "zoo", is_table = TRUE)
+
+    print(str_c("Importing from: ", tbls$table_name[r : min(r + r_step - 1, n)], " indicators: ", str_c(names(sz), collapse = ",")))
+    
+    if(!is.null(warnings())){
+      print("!")
+      summary(warnings())
+      assign("last.warning", NULL, envir = baseenv())
+    }
+    
+    if(is.null(sz)){
+      r <- r + r_step
+      next
+    }
+    
+    sz_time <- time(sz)
+    if (inherits(sz_time, "yearmon")){
+      freq <- 12
+      d <- ceiling_date(as_date(sz_time), unit = "month") - 1
+    } else if (inherits(sz_time, "yearqtr")){
+      freq <- 4
+      d <- ceiling_date(as_date(sz_time), unit = "quarter") - 1
+    } else{
+      freq <- 1
+      d <- dmy(str_glue("31.12.{sz_time}"))
+    }
+    
+    s <- as_tibble(sz) %>% 
+      mutate(rep_date = d, rep_freq = freq)
+    s <- s %>% 
+      pivot_longer(!starts_with("rep_"), names_to = "tsname", values_to = "val")
+    s_info <- as_tibble(attr(sz, "metadata"))
+    
+    export_to_db(db_path = fin_db_path, data = s, 
+                 target_table = "hse_ts", 
+                 delete_previous = FALSE)
+    export_to_db(db_path = fin_db_path, data = s_info, 
+                 target_table = "dic_hse_ts_info", 
+                 delete_previous = FALSE)
+    r <- r + r_step
+    Sys.sleep(0.3)
   }
-  
-  s$rep_date <- time_date
-  list(s, s_info)
 }
